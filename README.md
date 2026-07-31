@@ -8,14 +8,14 @@
 不需要装任何东西，也不联网：
 
 ```
-直接双击 snake3d/index.html
+直接双击 index.html
 ```
 
 或者起个本地服务（想用 localStorage 存最高分的话推荐这种）：
 
 ```bash
 python3 -m http.server 8000
-# 然后打开 http://localhost:8000/snake3d/
+# 然后打开 http://localhost:8000/
 ```
 
 ## 操作
@@ -56,7 +56,7 @@ python3 -m http.server 8000
 
 ## 技术上是怎么做的
 
-整个游戏是**一个 HTML 文件、零依赖**：没有 three.js，没有 CDN，
+整个游戏就是根目录下的 `index.html`，**一个文件、零依赖**：没有 three.js，没有 CDN，
 渲染是直接手写的 WebGL（约 200 行着色器 + 矩阵代码）。这样文件能离线跑、
 能直接双击打开，后面想换成 three.js 也不会有历史包袱。
 
