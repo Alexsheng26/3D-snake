@@ -122,12 +122,31 @@
   .rank li .sc{ font-weight: 700; font-variant-numeric: tabular-nums; }
   .rank li.me{ background: rgba(110,231,168,.14); }
   .rank li.me .nm, .rank li.me .sc{ color: var(--accent); }
-  .rank .empty{ color: var(--dim); font-size: 13px; padding: 4px 0; }
+  /* 空榜是一整句话，别套用上面那套三栏网格，否则会一个字一行 */
+  .rank li.empty{ display: block; color: var(--dim); font-size: 13px; padding: 4px 0; }
   .blink{ animation: blink 1.6s ease-in-out infinite; }
   @keyframes blink{ 0%,100%{ opacity: .45 } 50%{ opacity: 1 } }
   .hidden{ opacity: 0; visibility: hidden; }
   /* 这几块要真的收起来，否则卡片里会留空档 */
   .card .big.hidden, .namerow.hidden, .rank.hidden{ display: none; }
+
+  /* 音效开关 */
+  .mute{
+    position: absolute; left: 18px; bottom: 18px;
+    width: 42px; height: 42px; padding: 0; cursor: pointer;
+    display: grid; place-items: center;
+    pointer-events: auto; color: var(--dim);
+  }
+  .mute:hover{ color: var(--ink); }
+  .mute:focus-visible{ outline: 2px solid var(--accent); outline-offset: 2px; }
+  .mute svg{ width: 21px; height: 21px; }
+  .mute .spk{ fill: currentColor; }
+  .mute .on path, .mute .off path{
+    fill: none; stroke: currentColor; stroke-width: 1.7;
+    stroke-linecap: round;
+  }
+  body.muted .mute{ color: rgba(147,163,196,.55); }
+  body.muted .on, body:not(.muted) .off{ display: none; }
 
   /* 触屏方向键 */
   .pad{
@@ -170,8 +189,16 @@
   <div class="keys panel">
     <div><b>移动</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / <kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd></div>
     <div><b>暂停</b> <kbd>Space</kbd> &nbsp; <b>重开</b> <kbd>R</kbd></div>
-    <div><b>转视角</b> <kbd>Q</kbd><kbd>E</kbd> 或拖拽</div>
+    <div><b>转视角</b> <kbd>Q</kbd><kbd>E</kbd> 或拖拽 &nbsp; <b>音效</b> <kbd>M</kbd></div>
   </div>
+
+  <button class="mute panel" id="mute" type="button" title="音效开关 (M)" aria-label="音效开关">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path class="spk" d="M4 9.5v5h3.6L12 18V6L7.6 9.5H4z"/>
+      <g class="on"><path d="M15.4 9.2a4 4 0 0 1 0 5.6"/><path d="M17.9 6.8a7.5 7.5 0 0 1 0 10.4"/></g>
+      <g class="off"><path d="M15.6 9.6l4.8 4.8"/><path d="M20.4 9.6l-4.8 4.8"/></g>
+    </svg>
+  </button>
 
   <div class="center" id="overlay">
     <div class="card panel">
@@ -236,6 +263,109 @@ const CONFIG = {
   },
   light: [0.38, 0.86, 0.34],
 };
+
+/* ============================================================
+   0.5 音效 —— 全部现场合成，不引入任何音频文件
+   浏览器要求先有用户操作才能出声，所以 AudioContext 是
+   第一次按键 / 点击时才创建的（init 可以反复调，很便宜）
+   ============================================================ */
+const SFX = {
+  ctx: null, master: null, noise: null, muted: false, vol: 0.26,
+
+  init() {
+    if (this.ctx) {
+      if (this.ctx.state === "suspended") this.ctx.resume();
+      return;
+    }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;                                  // 老浏览器：静默降级，不报错
+    try { this.ctx = new AC(); } catch (e) { return; }
+    this.master = this.ctx.createGain();
+    this.master.gain.value = this.muted ? 0 : this.vol;
+    this.master.connect(this.ctx.destination);
+    // 一段白噪声，撞墙的闷响要用
+    const len = Math.floor(this.ctx.sampleRate * 0.4);
+    this.noise = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const d = this.noise.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  },
+
+  /** 一个带包络的音符；to 给了就滑音过去 */
+  tone(freq, at, dur, o = {}) {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime + at;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = o.type || "triangle";
+    osc.frequency.setValueAtTime(freq, t);
+    if (o.to) osc.frequency.exponentialRampToValueAtTime(o.to, t + dur);
+    const peak = o.gain || 0.3;
+    g.gain.setValueAtTime(0.0001, t);                 // 指数包络不能从 0 开始
+    g.gain.exponentialRampToValueAtTime(peak, t + Math.min(0.012, dur * 0.3));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g); g.connect(this.master);
+    osc.start(t); osc.stop(t + dur + 0.02);
+  },
+
+  /** 噪声经低通，用来做撞击的闷响 */
+  thud(at, dur, cut, gain) {
+    if (!this.ctx || this.muted || !this.noise) return;
+    const t = this.ctx.currentTime + at;
+    const src = this.ctx.createBufferSource();
+    const lp = this.ctx.createBiquadFilter();
+    const g = this.ctx.createGain();
+    src.buffer = this.noise;
+    lp.type = "lowpass";
+    lp.frequency.setValueAtTime(cut, t);
+    lp.frequency.exponentialRampToValueAtTime(cut * 0.25, t + dur);
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(lp); lp.connect(g); g.connect(this.master);
+    src.start(t); src.stop(t + dur + 0.02);
+  },
+
+  turn()  { this.tone(720, 0, 0.035, { type: "square", gain: 0.05 }); },
+  start() { this.tone(440, 0, 0.08, { gain: 0.22 }); this.tone(660, 0.07, 0.13, { gain: 0.22 }); },
+  pause() { this.tone(500, 0, 0.10, { type: "sine", gain: 0.16, to: 340 }); },
+
+  /** 吃普通果实：音高跟着分数往上爬一点，连吃会有递进感 */
+  eat(n) {
+    const k = 1 + (n % 6) * 0.075;
+    this.tone(620 * k, 0, 0.075, { gain: 0.38 });
+    this.tone(930 * k, 0.05, 0.10, { gain: 0.30 });
+  },
+  /** 金果：一串上行琶音，明显比普通果实"值钱" */
+  eatGold() {
+    [880, 1108, 1318, 1760].forEach((f, i) =>
+      this.tone(f, i * 0.05, 0.16, { gain: 0.26 }));
+    this.tone(2637, 0.21, 0.24, { type: "sine", gain: 0.13 });
+  },
+  goldSpawn() {
+    this.tone(1568, 0, 0.10, { type: "sine", gain: 0.12 });
+    this.tone(2093, 0.07, 0.13, { type: "sine", gain: 0.09 });
+  },
+  goldGone() { this.tone(680, 0, 0.18, { type: "sine", gain: 0.10, to: 400 }); },
+
+  die() {
+    this.tone(300, 0, 0.42, { type: "sawtooth", gain: 0.30, to: 70 });
+    this.thud(0, 0.45, 900, 0.42);
+  },
+  record() {
+    [523, 659, 784, 1046].forEach((f, i) =>
+      this.tone(f, 0.22 + i * 0.085, 0.22, { gain: 0.26 }));
+  },
+
+  setMuted(m) {
+    this.muted = m;
+    if (this.master) this.master.gain.value = m ? 0 : this.vol;
+    document.body.classList.toggle("muted", m);
+    try { localStorage.setItem("snake3d.muted", m ? "1" : "0"); } catch (e) {}
+  },
+  toggle() { this.init(); this.setMuted(!this.muted); },
+};
+
+try { SFX.muted = localStorage.getItem("snake3d.muted") === "1"; } catch (e) {}
+document.body.classList.toggle("muted", SFX.muted);
 
 /* ============================================================
    1. 迷你向量 / 矩阵库（列主序 mat4）
@@ -556,7 +686,7 @@ const ui = {
   overlay: $("overlay"), title: $("ov-title"), text: $("ov-text"),
   ovScore: $("ov-score"), hint: $("ov-hint"),
   nameRow: $("ov-namerow"), name: $("ov-name"), start: $("ov-start"),
-  rank: $("ov-rank"), list: $("ov-list"),
+  rank: $("ov-rank"), list: $("ov-list"), mute: $("mute"),
 };
 
 /* ---- 计分榜（存在 localStorage，无痕模式下就只在本次会话有效）---- */
@@ -637,6 +767,7 @@ function spawnFood() {
   const g = CONFIG.gold;
   const gold = S.score >= g.minScore && Math.random() < g.chance;
   S.food = { x: cell.x, z: cell.z, gold, ttl: gold ? g.ttlMs : 0 };
+  if (gold) SFX.goldSpawn();                // 金果出现给个提示音，别错过
 }
 
 function reset() {
@@ -726,6 +857,7 @@ function step() {
   if (ate) {
     const gold = S.food.gold;                 // 要在 spawnFood 换掉果实之前读
     S.score += gold ? CONFIG.gold.points : 1;
+    gold ? SFX.eatGold() : SFX.eat(S.score);
     S.tickMs = Math.max(CONFIG.minTickMs, S.tickMs - CONFIG.speedUp);
     S.eatFlash = 1;
     burst(nx - HALF, nz - HALF, gold ? CONFIG.color.gold : CONFIG.color.food, gold);
@@ -743,6 +875,8 @@ function die() {
   S.state = "over";
   S.shake = 1;
   S.lastRank = S.score > 0 ? recordScore(S.name, S.score) : -1;   // 0 分不占榜
+  SFX.die();
+  if (S.lastRank === 0) SFX.record();                             // 拿第一才有这段
   syncUI();
 }
 
@@ -751,6 +885,8 @@ function startPlaying() {
   S.name = commitName();
   ui.name.blur();
   S.state = "playing";
+  SFX.init();
+  SFX.start();
   syncUI();
 }
 
@@ -797,13 +933,23 @@ function input(which) {
   if (S.state === "ready") startPlaying();
   if (S.state === "paused") return;
   const d = screenDir(which);
-  if (S.queue.length < 2) S.queue.push(d);
+  // 跟最后一个已排队的方向比：同向没意义，掉头会撞自己脖子，都别入队
+  const last = S.queue.length ? S.queue[S.queue.length - 1] : S.dir;
+  if (d.x === last.x && d.z === last.z) return;
+  if (d.x === -last.x && d.z === -last.z) return;
+  if (S.queue.length < 2) { S.queue.push(d); SFX.turn(); }
 }
 
 const KEYS = {
   ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
   KeyW: "up", KeyS: "down", KeyA: "left", KeyD: "right",
 };
+
+// 浏览器要有用户操作才允许出声，任何一次按键 / 点击都拿来解锁音频
+for (const ev of ["keydown", "pointerdown"]) {
+  addEventListener(ev, () => SFX.init(), { passive: true });
+}
+ui.mute.addEventListener("click", () => SFX.toggle());
 
 addEventListener("keydown", (e) => {
   // 正在输入名字：键盘全归输入框，只有回车代表「就叫这个，开始」
@@ -826,9 +972,11 @@ addEventListener("keydown", (e) => {
   if (e.code === "Space") {
     e.preventDefault();
     if (S.state === "over") restart();
-    else if (S.state === "playing") { S.state = "paused"; syncUI(); }
-    else if (S.state === "paused") { S.state = "playing"; syncUI(); }
+    else if (S.state === "playing") { S.state = "paused"; SFX.pause(); syncUI(); }
+    else if (S.state === "paused") { S.state = "playing"; SFX.pause(); syncUI(); }
     else if (S.state === "ready") startPlaying();
+  } else if (e.code === "KeyM") {
+    SFX.toggle();
   } else if (e.code === "KeyR") {
     S.state === "ready" ? reset() : restart();
   } else if (e.code === "KeyQ") {
@@ -937,7 +1085,7 @@ function frame(nowMs) {
     // 金果限时：到点了就变回普通果实，位置不动
     if (S.food.gold) {
       S.food.ttl -= dt * 1000;
-      if (S.food.ttl <= 0) { S.food.gold = false; S.food.ttl = 0; }
+      if (S.food.ttl <= 0) { S.food.gold = false; S.food.ttl = 0; SFX.goldGone(); }
     }
   }
   S.eatFlash = Math.max(0, S.eatFlash - dt * 3);
