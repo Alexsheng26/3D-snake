@@ -3,7 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>3D 贪吃蛇 · 雏形</title>
+<title>3D 贪吃蛇</title>
+<meta name="description" content="45° 俯视视角的立体贪吃蛇：棋盘、蛇身、果实全是真的 3D 几何体。手写 WebGL，单文件零依赖，手机上滑动就能玩。">
+<meta name="theme-color" content="#131c33">
+<!-- 图标直接内嵌成 data URI，保持单文件、离线可用 -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Cdefs%3E%3ClinearGradient%20id='g'%20x1='0'%20y1='0'%20x2='0'%20y2='1'%3E%3Cstop%20offset='0'%20stop-color='%238dfab6'/%3E%3Cstop%20offset='1'%20stop-color='%2331ad78'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='%23131c33'/%3E%3Crect%20x='8'%20y='34'%20width='17'%20height='17'%20rx='4'%20fill='%232f9e6a'/%3E%3Crect%20x='21'%20y='22'%20width='17'%20height='17'%20rx='4'%20fill='%233fc489'/%3E%3Crect%20x='26'%20y='26'%20width='26'%20height='26'%20rx='6'%20fill='url(%23g)'/%3E%3Ccircle%20cx='34'%20cy='37'%20r='3.6'%20fill='%230b1020'/%3E%3Ccircle%20cx='45'%20cy='37'%20r='3.6'%20fill='%230b1020'/%3E%3Ccircle%20cx='44'%20cy='16'%20r='7.5'%20fill='%23ff5b6e'/%3E%3Crect%20x='43'%20y='7'%20width='2.6'%20height='4.5'%20rx='1.3'%20fill='%236b4a2f'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<!-- 分享卡片。og:image 必须是绝对地址，抓取的一方没法解析相对路径，
+     所以这里写死了 Pages 的域名；换仓库名或换域名时要一起改。 -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="3D 贪吃蛇">
+<meta property="og:description" content="45° 俯视视角的立体贪吃蛇：棋盘、蛇身、果实全是真的 3D 几何体。手写 WebGL，单文件零依赖，手机上滑动就能玩。">
+<meta property="og:url" content="https://alexsheng26.github.io/3D-snake/">
+<meta property="og:image" content="https://alexsheng26.github.io/3D-snake/preview.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <style>
   :root{
     --ink: #e8eefc;
@@ -877,7 +892,8 @@ function step() {
 function die() {
   S.state = "over";
   S.shake = 1;
-  S.lastRank = S.score > 0 ? recordScore(S.name, S.score) : -1;   // 0 分不占榜
+  // 正常流程里 S.name 一定过了 commitName，这个兜底只防将来漏改
+  S.lastRank = S.score > 0 ? recordScore(S.name || "无名玩家", S.score) : -1;   // 0 分不占榜
   SFX.die();
   if (S.lastRank === 0) SFX.record();                             // 拿第一才有这段
   syncUI();
