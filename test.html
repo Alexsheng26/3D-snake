@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D 贪吃蛇 · 测试</title>
+<style>
+  :root{
+    --ink:#e8eefc; --dim:#93a3c4; --ok:#6ee7a8; --bad:#ff6b7a;
+    --panel:rgba(14,22,41,.55); --edge:rgba(150,180,255,.18);
+  }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; min-height:100vh; padding:28px 20px 60px;
+    background:radial-gradient(120% 90% at 50% -10%,#223560 0%,#131c33 45%,#0a0f1e 100%);
+    color:var(--ink);
+    font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,"PingFang SC","Microsoft YaHei",monospace;
+  }
+  .wrap{ max-width:860px; margin:0 auto; }
+  h1{ font-size:20px; margin:0 0 4px; }
+  .sub{ color:var(--dim); font-size:13px; margin-bottom:20px; }
+  .sub a{ color:var(--ok); }
+
+  .bar{
+    display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+    padding:14px 18px; margin-bottom:20px; border-radius:14px;
+    background:var(--panel); border:1px solid var(--edge);
+    position:sticky; top:12px; backdrop-filter:blur(10px);
+  }
+  .bar .n{ font-size:22px; font-weight:700; }
+  .bar .n.ok{ color:var(--ok); } .bar .n.bad{ color:var(--bad); }
+  .bar button{
+    margin-left:auto; padding:7px 16px; cursor:pointer; font:inherit; font-size:13px;
+    background:rgba(110,231,168,.16); border:1px solid rgba(110,231,168,.42);
+    border-radius:9px; color:var(--ok);
+  }
+  .bar button:hover{ background:rgba(110,231,168,.26); }
+
+  section{ margin-bottom:18px; }
+  h2{
+    font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--dim); margin:0 0 8px; font-weight:600;
+  }
+  .row{
+    display:grid; grid-template-columns:52px 1fr; gap:12px;
+    padding:6px 12px; border-radius:8px; align-items:baseline;
+  }
+  .row + .row{ margin-top:2px; }
+  .row.pass{ background:rgba(110,231,168,.07); }
+  .row.fail{ background:rgba(255,107,122,.13); }
+  .tag{ font-size:11px; font-weight:700; letter-spacing:.06em; }
+  .pass .tag{ color:var(--ok); } .fail .tag{ color:var(--bad); }
+  .why{ display:block; color:var(--bad); font-size:12px; margin-top:3px; }
+
+  .stage{
+    margin-top:28px; padding-top:18px; border-top:1px solid var(--edge);
+    color:var(--dim); font-size:12px;
+  }
+  iframe{
+    width:420px; height:260px; max-width:100%;
+    border:1px solid var(--edge); border-radius:12px; margin-top:10px;
+    background:#0a0f1e;
+  }
+  .note{
+    padding:14px 18px; border-radius:12px; margin-bottom:20px;
+    background:rgba(255,107,122,.12); border:1px solid rgba(255,107,122,.4);
+    color:#ffd9de; font-size:13px; line-height:1.8;
+  }
+  .note code{ background:rgba(0,0,0,.3); padding:1px 6px; border-radius:5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>3D 贪吃蛇 · 测试</h1>
+  <div class="sub">
+    在 iframe 里跑<b>真实的 index.html</b>，测的就是发布出去的那个文件。
+  </div>
+
+  <div class="bar">
+    <div><span class="n" id="n-pass">–</span> <span style="color:var(--dim)">通过</span></div>
+    <div><span class="n" id="n-fail">–</span> <span style="color:var(--dim)">失败</span></div>
+    <div id="dur" style="color:var(--dim);font-size:12px"></div>
+    <button id="again" type="button">重跑</button>
+  </div>
+
+  <div id="results"></div>
+
+  <div class="stage">
+    下面这个 iframe 就是被测的游戏本体（测试会直接操作它的内部状态）：
+    <iframe id="game" src="index.html" title="被测游戏"></iframe>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+const results = $("results");
+
+/* ---------- 极简断言框架 ---------- */
+let group = null, passed = 0, failed = 0;
+
+function section(name) {
+  const s = document.createElement("section");
+  const h = document.createElement("h2");
+  h.textContent = name;
+  s.append(h);
+  results.append(s);
+  group = s;
+}
+
+function ok(name, cond, why) {
+  const good = !!cond;
+  good ? passed++ : failed++;
+  const row = document.createElement("div");
+  row.className = "row " + (good ? "pass" : "fail");
+  const tag = document.createElement("span");
+  tag.className = "tag";
+  tag.textContent = good ? "PASS" : "FAIL";
+  const label = document.createElement("span");
+  label.textContent = name;
+  if (!good && why) {
+    const w = document.createElement("span");
+    w.className = "why";
+    w.textContent = why;
+    label.append(w);
+  }
+  row.append(tag, label);
+  group.append(row);
+}
+
+/** 把抛异常也算成一条失败，不要让整个套件半路停掉 */
+function guard(name, fn) {
+  try { fn(); }
+  catch (e) { ok(name, false, "抛异常：" + (e && e.message ? e.message : e)); }
+}
+
+const near = (a, b, tol) => Math.abs(a - b) <= tol;
+
+/* ---------- 跑测试 ---------- */
+async function run() {
+  results.textContent = "";
+  passed = failed = 0;
+  const t0 = performance.now();
+
+  const win = $("game").contentWindow;
+  const G = win.__snake3d;
+  if (!G) {
+    section("跑不起来");
+    ok("拿到游戏内部状态", false,
+       "window.__snake3d 不存在。多半是 file:// 下 iframe 被跨源拦了，" +
+       "用 python3 -m http.server 起个服务再打开，或者直接开 Pages 上的 test.html。");
+    finish(t0);
+    return;
+  }
+
+  const { CONFIG, S, SFX, ui, canvas, N, DIRS } = G;
+
+  // 测试会写 localStorage，先备份，跑完还原，别把玩家的记录冲掉
+  const LS_KEYS = [G.KEY_SCORES, G.KEY_NAME, "snake3d.muted"];
+  const backup = {};
+  for (const k of LS_KEYS) backup[k] = win.localStorage.getItem(k);
+
+  const restore = () => {
+    for (const k of LS_KEYS) {
+      backup[k] === null ? win.localStorage.removeItem(k)
+                         : win.localStorage.setItem(k, backup[k]);
+    }
+  };
+
+  try {
+    await suites(win, G);
+  } finally {
+    restore();
+    G.S.scores = G.loadScores();
+    G.reset();
+  }
+  finish(t0);
+}
+
+function finish(t0) {
+  $("n-pass").textContent = passed;
+  $("n-pass").className = "n ok";
+  $("n-fail").textContent = failed;
+  $("n-fail").className = "n " + (failed ? "bad" : "ok");
+  $("dur").textContent = `${passed + failed} 条断言 · ${Math.round(performance.now() - t0)}ms`;
+  document.title = failed ? `❌ ${failed} 条失败 · 测试` : `✅ 全部通过 · 测试`;
+}
+
+async function suites(win, G) {
+  const { CONFIG, S, SFX, ui, canvas, N, DIRS } = G;
+  const dirName = (d) => !d ? "无" : d.x === 1 ? "+X" : d.x === -1 ? "-X" : d.z === 1 ? "+Z" : "-Z";
+  const fresh = () => { G.reset(); G.startPlaying(); };
+  /** 把果实摆到蛇头正前方，走一步就吃到 */
+  const eatNext = (gold) => {
+    const h = S.snake[0];
+    S.food = { x: h.x + S.dir.x, z: h.z + S.dir.z, gold,
+               ttl: gold ? CONFIG.gold.ttlMs : 0 };
+    G.step();
+  };
+
+  /* ============ 移动与碰撞 ============ */
+  section("移动与碰撞");
+
+  guard("开局长度", () => {
+    G.reset();
+    ok(`开局长度 = CONFIG.startLen (${CONFIG.startLen})`, S.snake.length === CONFIG.startLen);
+  });
+
+  guard("前进一格", () => {
+    fresh();
+    const before = { ...S.snake[0] }, d = S.dir;
+    S.food = { x: -9, z: -9, gold: false, ttl: 0 };       // 放到棋盘外，保证吃不到
+    G.step();
+    ok("走一步蛇头前进一格",
+       S.snake[0].x === before.x + d.x && S.snake[0].z === before.z + d.z,
+       `期望 (${before.x + d.x},${before.z + d.z})，实际 (${S.snake[0].x},${S.snake[0].z})`);
+  });
+
+  guard("吃到变长", () => {
+    fresh();
+    const len = S.snake.length;
+    eatNext(false);
+    ok("吃到果实长一节", S.snake.length === len + 1, `${len} → ${S.snake.length}`);
+  });
+
+  guard("不吃不变长", () => {
+    fresh();
+    const len = S.snake.length;
+    S.food = { x: -9, z: -9, gold: false, ttl: 0 };
+    G.step();
+    ok("没吃到长度不变", S.snake.length === len);
+  });
+
+  guard("撞墙", () => {
+    fresh();
+    S.snake = [{ x: N - 1, z: 3 }];
+    S.prev = [{ x: N - 1, z: 3 }];
+    S.dir = { x: 1, z: 0 };
+    G.step();
+    ok("撞墙判定死亡", S.state === "over", `state=${S.state}`);
+  });
+
+  guard("撞自己", () => {
+    fresh();
+    // 一个回环：头往下走会撞到自己身体
+    S.snake = [{x:5,z:5},{x:6,z:5},{x:6,z:6},{x:5,z:6},{x:4,z:6},{x:4,z:5}];
+    S.prev = S.snake.map((p) => ({ ...p }));
+    S.dir = { x: 0, z: 1 };
+    S.food = { x: -9, z: -9, gold: false, ttl: 0 };
+    G.step();
+    ok("撞到自己身体判定死亡", S.state === "over", `state=${S.state}`);
+  });
+
+  guard("尾巴尖", () => {
+    fresh();
+    // 这一步尾巴会让开，所以踩到尾巴尖不该死
+    S.snake = [{x:5,z:5},{x:5,z:6},{x:6,z:6},{x:6,z:5}];
+    S.prev = S.snake.map((p) => ({ ...p }));
+    S.dir = { x: 1, z: 0 };                                 // 目标格正是当前尾巴
+    S.food = { x: -9, z: -9, gold: false, ttl: 0 };
+    G.step();
+    ok("追着自己尾巴尖不算撞", S.state === "playing", `state=${S.state}`);
+  });
+
+  guard("不能掉头", () => {
+    fresh();
+    S.dir = { x: 1, z: 0 };
+    S.queue.length = 0;
+    S.queue.push({ x: -1, z: 0 });                          // 硬塞一个反向
+    S.food = { x: -9, z: -9, gold: false, ttl: 0 };
+    G.step();
+    ok("反向指令不会让蛇掉头", S.dir.x === 1 && S.dir.z === 0, `dir=${dirName(S.dir)}`);
+  });
+
+  guard("接头不会被拉长", () => {
+    fresh();
+    let maxGap = 0;
+    for (let k = 0; k < 60 && S.state === "playing"; k++) {
+      G.step();
+      for (let i = 0; i < S.snake.length - 1; i++) {
+        for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+          const at = (j) => {
+            const c = S.snake[j], p = S.prev[j] || c;
+            return [p.x + (c.x - p.x) * t, p.z + (c.z - p.z) * t];
+          };
+          const a = at(i), b = at(i + 1);
+          maxGap = Math.max(maxGap, Math.hypot(b[0] - a[0], b[1] - a[1]));
+        }
+      }
+    }
+    // 蛇身接头是按两节中心连线画的，间距超过 1 格就会拉出穿模的长柱
+    ok(`相邻两节间距 ≤ 1 格（实测 ${maxGap.toFixed(3)}）`, maxGap <= 1.001);
+  });
+
+  /* ============ 果实 ============ */
+  section("果实");
+
+  guard("普通果实计分", () => {
+    fresh(); S.score = 0;
+    eatNext(false);
+    ok("普通果实 +1", S.score === 1, `score=${S.score}`);
+  });
+
+  guard("金果计分", () => {
+    fresh(); S.score = 10;
+    eatNext(true);
+    ok(`金果 +${CONFIG.gold.points}（10 → ${S.score}）`,
+       S.score === 10 + CONFIG.gold.points);
+  });
+
+  guard("金果门槛", () => {
+    fresh();
+    S.score = CONFIG.gold.minScore - 1;
+    let any = false;
+    for (let i = 0; i < 200; i++) { G.spawnFood(); if (S.food.gold) any = true; }
+    ok(`分数低于 minScore(${CONFIG.gold.minScore}) 时不出金果`, !any);
+  });
+
+  guard("金果概率", () => {
+    fresh();
+    S.score = CONFIG.gold.minScore;
+    let n = 0;
+    for (let i = 0; i < 600; i++) { G.spawnFood(); if (S.food.gold) n++; }
+    const rate = n / 600;
+    ok(`金果出现率接近 ${CONFIG.gold.chance}（实测 ${rate.toFixed(3)}）`,
+       near(rate, CONFIG.gold.chance, 0.07));
+  });
+
+  guard("果实不刷在身上", () => {
+    fresh();
+    let bad = 0;
+    for (let i = 0; i < 300; i++) {
+      G.spawnFood();
+      if (S.snake.some((c) => c.x === S.food.x && c.z === S.food.z)) bad++;
+    }
+    ok("果实不会刷在蛇身上", bad === 0, `${bad} 次刷重叠`);
+  });
+
+  /* ============ 计分榜 ============ */
+  section("计分榜");
+
+  guard("排序与名次", () => {
+    S.scores = [];
+    S.name = "A"; S.score = 10; G.die();
+    S.name = "B"; S.score = 30; G.die();
+    S.name = "C"; S.score = 20; G.die();
+    ok("按分数降序", S.scores.map((r) => r.name).join("") === "BCA",
+       S.scores.map((r) => `${r.name}:${r.score}`).join(" "));
+    ok("本局名次正确（C 应是第 2）", S.lastRank === 1, `lastRank=${S.lastRank}`);
+  });
+
+  guard("同分", () => {
+    S.scores = [];
+    S.name = "早"; S.score = 5; G.die();
+    S.name = "晚"; S.score = 5; G.die();
+    ok("同分先到的排前面", S.scores[0].name === "早");
+  });
+
+  guard("0 分", () => {
+    S.scores = [];
+    S.name = "零"; S.score = 0; G.die();
+    ok("0 分不进榜", S.scores.length === 0 && S.lastRank === -1);
+  });
+
+  guard("上限", () => {
+    S.scores = [];
+    for (let i = 0; i < G.RANK_KEEP + 15; i++) { S.name = "P" + i; S.score = i + 1; G.die(); }
+    ok(`榜最多留 ${G.RANK_KEEP} 条`, S.scores.length === G.RANK_KEEP,
+       `实际 ${S.scores.length}`);
+  });
+
+  guard("存读", () => {
+    S.scores = [];
+    S.name = "存盘"; S.score = 13; G.die();
+    const back = G.loadScores();
+    ok("成绩写进 localStorage 又能读回来",
+       back.length === 1 && back[0].name === "存盘" && back[0].score === 13);
+  });
+
+  guard("脏数据", () => {
+    win.localStorage.setItem(G.KEY_SCORES, "{ 这不是 JSON");
+    const back = G.loadScores();
+    ok("localStorage 里是坏数据时不崩，返回空榜", Array.isArray(back) && back.length === 0);
+    win.localStorage.setItem(G.KEY_SCORES,
+      JSON.stringify([{ name: "好", score: 5 }, { nope: 1 }, { name: "坏", score: "abc" }]));
+    ok("脏记录被过滤掉，只留合法的", G.loadScores().length === 1);
+  });
+
+  guard("名字当文本渲染", () => {
+    S.scores = [];
+    S.name = "<img src=x onerror=alert(1)>"; S.score = 7; G.die();
+    ok("玩家名不会被当 HTML 执行",
+       ui.list.querySelector("img") === null && ui.list.textContent.includes("<img"));
+  });
+
+  /* ============ 名字 ============ */
+  section("名字");
+
+  guard("空名兜底", () => {
+    G.reset(); ui.name.value = "   "; G.startPlaying();
+    ok("空名字兜底成「无名玩家」", S.name === "无名玩家", `name=${S.name}`);
+  });
+
+  guard("截断", () => {
+    G.reset(); ui.name.value = "一二三四五六七八九十十一十二十三"; G.startPlaying();
+    ok("名字最长 12 个字", S.name.length === 12, `长度 ${S.name.length}`);
+  });
+
+  guard("输入框抢键盘", () => {
+    G.reset();
+    ui.name.value = "小杨";
+    ui.name.focus();
+    win.dispatchEvent(new win.KeyboardEvent("keydown", { code: "KeyW", bubbles: true }));
+    ok("聚焦输入框时按 W 不会开局（要能打字）", S.state === "ready", `state=${S.state}`);
+    win.dispatchEvent(new win.KeyboardEvent("keydown", { code: "Enter", bubbles: true }));
+    ok("回车直接开局", S.state === "playing");
+    ok("回车后输入框失焦", win.document.activeElement !== ui.name);
+  });
+
+  /* ============ 音效 ============ */
+  section("音效");
+
+  SFX.init();
+  const hasAudio = !!SFX.ctx;
+  ok("AudioContext 能创建" + (hasAudio ? `（state=${SFX.ctx.state}）` : ""), hasAudio,
+     "浏览器没给 Web Audio，后面几条跳过");
+
+  if (hasAudio) {
+    let osc = 0, buf = 0;
+    const co = SFX.ctx.createOscillator.bind(SFX.ctx);
+    const cb = SFX.ctx.createBufferSource.bind(SFX.ctx);
+    SFX.ctx.createOscillator = () => { osc++; return co(); };
+    SFX.ctx.createBufferSource = () => { buf++; return cb(); };
+    const count = (fn) => { osc = 0; buf = 0; fn(); return [osc, buf]; };
+
+    const wasMuted = SFX.muted;
+    SFX.setMuted(false);
+
+    guard("音效节点数", () => {
+      ok("吃普通果实排 2 个音", String(count(() => SFX.eat(3))) === "2,0");
+      ok("吃金果排 5 个音（琶音）", String(count(() => SFX.eatGold())) === "5,0");
+      ok("转向排 1 个短音", String(count(() => SFX.turn())) === "1,0");
+      ok("死亡排 1 个滑音 + 1 段噪声", String(count(() => SFX.die())) === "1,1");
+      ok("破纪录排 4 个音", String(count(() => SFX.record())) === "4,0");
+    });
+
+    guard("静音", () => {
+      SFX.setMuted(true);
+      ok("静音后一个节点都不排",
+         String(count(() => { SFX.eat(1); SFX.die(); SFX.eatGold(); })) === "0,0");
+      ok("静音后主音量归零", SFX.master.gain.value === 0);
+      ok("静音状态存进 localStorage", win.localStorage.getItem("snake3d.muted") === "1");
+      SFX.setMuted(false);
+      // AudioParam 存的是 float32，别用 === 跟 float64 比
+      ok(`取消静音后音量恢复（${SFX.master.gain.value.toFixed(4)}）`,
+         near(SFX.master.gain.value, SFX.vol, 1e-6));
+    });
+
+    guard("游戏事件接上了音效", () => {
+      fresh();
+      ok("吃到果实真的发声", count(() => eatNext(false))[0] >= 2);
+      ok("吃到金果发的是琶音", count(() => eatNext(true))[0] >= 5);
+    });
+
+    SFX.ctx.createOscillator = co;
+    SFX.ctx.createBufferSource = cb;
+    SFX.setMuted(wasMuted);
+  }
+
+  guard("没有 Web Audio 也不崩", () => {
+    const savedCtx = SFX.ctx, AC = win.AudioContext, WAC = win.webkitAudioContext;
+    SFX.ctx = null; win.AudioContext = undefined; win.webkitAudioContext = undefined;
+    let threw = false;
+    try { SFX.init(); SFX.eat(1); SFX.die(); SFX.turn(); SFX.eatGold(); SFX.record(); }
+    catch (e) { threw = true; }
+    win.AudioContext = AC; win.webkitAudioContext = WAC; SFX.ctx = savedCtx;
+    ok("浏览器没有 Web Audio 时静默降级，不报错", !threw);
+  });
+
+  /* ============ 手势 ============ */
+  section("手势（手机滑动 / 鼠标拖拽）");
+
+  const pe = (type, o, target) =>
+    (target || win).dispatchEvent(new win.PointerEvent(type,
+      Object.assign({ bubbles: true, cancelable: true }, o)));
+  const down = (id, x, y, t) => pe("pointerdown",
+    { pointerId: id, clientX: x, clientY: y, pointerType: t || "touch" }, canvas);
+  const move = (id, x, y, t) => pe("pointermove",
+    { pointerId: id, clientX: x, clientY: y, pointerType: t || "touch" });
+  const up = (id, t) => pe("pointerup", { pointerId: id, pointerType: t || "touch" });
+  const swipe = (dx, dy, id) => { down(id || 1, 200, 200); move(id || 1, 200 + dx, 200 + dy); up(id || 1); };
+
+  guard("四个方向", () => {
+    S.cam.yaw = S.cam.yawTarget = 0;                        // 视角归零，屏幕方向正对网格轴
+    // 初始朝向必须跟滑动方向垂直，否则滑出来的是掉头，会被正确地拒掉，
+    // 测的就成了「掉头拒绝」而不是「方向映射」。掉头另有专门的用例。
+    const cases = [
+      ["上滑", 0, -80, { x: 1, z: 0 }, (d) => d.z === -1, "-Z"],
+      ["下滑", 0, 80, { x: 1, z: 0 }, (d) => d.z === 1, "+Z"],
+      ["左滑", -80, 0, { x: 0, z: 1 }, (d) => d.x === -1, "-X"],
+      ["右滑", 80, 0, { x: 0, z: 1 }, (d) => d.x === 1, "+X"],
+    ];
+    for (const [label, dx, dy, startDir, check, want] of cases) {
+      fresh();
+      S.dir = startDir;                                     // 保证目标方向不是掉头
+      S.queue.length = 0;
+      swipe(dx, dy);
+      ok(`${label} → 屏幕对应的 ${want}`,
+         S.queue.length === 1 && check(S.queue[0]),
+         `实际 ${dirName(S.queue[0])}`);
+    }
+  });
+
+  guard("阈值", () => {
+    fresh(); S.queue.length = 0;
+    swipe(0, -(G.SWIPE_MIN - 10));
+    ok(`位移小于 ${G.SWIPE_MIN}px 不触发（防误触）`, S.queue.length === 0);
+  });
+
+  guard("一笔连拐", () => {
+    fresh(); S.dir = { x: 1, z: 0 }; S.queue.length = 0;
+    down(2, 200, 200); move(2, 200, 120); move(2, 120, 120); up(2);
+    ok("一笔画折线能连拐两次",
+       S.queue.length === 2 && S.queue[0].z === -1 && S.queue[1].x === -1,
+       `实际 ${S.queue.map(dirName).join(",")}`);
+  });
+
+  guard("点一下", () => {
+    fresh(); S.queue.length = 0;
+    down(3, 200, 200); up(3);
+    ok("只是点一下不会转向", S.queue.length === 0);
+  });
+
+  guard("双指", () => {
+    fresh(); S.queue.length = 0;
+    const yaw0 = S.cam.yawTarget;
+    down(4, 150, 300); down(5, 250, 300);
+    move(4, 250, 300); move(5, 350, 300);
+    ok("双指横拖会转视角", Math.abs(S.cam.yawTarget - yaw0) > 0.1);
+    ok("双指期间不会误触发转向", S.queue.length === 0);
+    up(4); up(5);
+  });
+
+  guard("鼠标", () => {
+    fresh(); S.queue.length = 0;
+    const yaw0 = S.cam.yawTarget;
+    down(6, 200, 200, "mouse"); move(6, 320, 200, "mouse");
+    ok("鼠标拖拽转视角", Math.abs(S.cam.yawTarget - yaw0) > 0.1);
+    ok("鼠标拖拽不会转向", S.queue.length === 0);
+    up(6, "mouse");
+    const yaw1 = S.cam.yawTarget;
+    move(6, 500, 200, "mouse");
+    ok("松手后再动鼠标不再转视角", S.cam.yawTarget === yaw1);
+  });
+
+  guard("视角转了之后", () => {
+    fresh();
+    S.cam.yaw = S.cam.yawTarget = Math.PI / 2;              // 镜头转 90°
+    S.dir = { x: 0, z: 1 };                                 // 让 -X 是合法转向
+    S.queue.length = 0;
+    swipe(0, -80);
+    ok("转 90° 视角后，上滑对应的网格方向跟着变（-X）",
+       S.queue.length === 1 && S.queue[0].x === -1, `实际 ${dirName(S.queue[0])}`);
+
+    fresh();
+    S.cam.yaw = S.cam.yawTarget = Math.PI / 2;
+    S.dir = { x: 1, z: 0 };                                 // 这时上滑正好是掉头
+    S.queue.length = 0;
+    swipe(0, -80);
+    ok("滑出来的方向若是掉头，照样拒绝", S.queue.length === 0);
+    S.cam.yaw = S.cam.yawTarget = CONFIG.cam.yaw * Math.PI / 180;
+  });
+
+  guard("状态清理", () => {
+    ok("手指 / 拖拽状态都清干净了",
+       G.fingers.size === 0 && G.twoFinger === null && G.mouseDrag === null,
+       `fingers=${G.fingers.size} twoFinger=${G.twoFinger} mouseDrag=${G.mouseDrag}`);
+  });
+
+  /* ============ 分享用的元信息 ============ */
+  section("图标与分享卡片");
+
+  guard("meta", () => {
+    const d = win.document;
+    const icon = d.querySelector('link[rel="icon"]');
+    ok("有 favicon", !!icon);
+    ok("favicon 是内嵌 data URI（保持单文件）",
+       !!icon && icon.getAttribute("href").startsWith("data:image/svg+xml"));
+    const img = d.querySelector('meta[property="og:image"]');
+    ok("有 og:image", !!img);
+    ok("og:image 是绝对地址（抓取方解析不了相对路径）",
+       !!img && /^https?:\/\//.test(img.getAttribute("content")));
+    ok("有 og:title 和描述",
+       !!d.querySelector('meta[property="og:title"]') &&
+       !!d.querySelector('meta[name="description"]'));
+  });
+
+  await new Promise((r) => setTimeout(r, 0));
+}
+
+$("again").addEventListener("click", run);
+$("game").addEventListener("load", run);
+if ($("game").contentWindow && $("game").contentWindow.__snake3d) run();
+</script>
+</body>
+</html>

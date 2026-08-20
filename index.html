@@ -1304,6 +1304,19 @@ function frame(nowMs) {
 
 reset();
 requestAnimationFrame(frame);
+
+/* 给 test.html 用的出口：把内部状态和几个函数挂到 window 上。
+   游戏本身一行都不读它，删掉也照常运行。
+   之所以需要这个，是因为上面这些都是顶层 const/let，
+   不会自动挂到 window，外面的测试页够不着。 */
+window.__snake3d = {
+  CONFIG, S, SFX, ui, canvas, N, HALF, DIRS, fingers,
+  RANK_KEEP, KEY_SCORES, KEY_NAME, SWIPE_MIN,
+  get twoFinger() { return twoFinger; },      // let，要用 getter 才拿得到最新值
+  get mouseDrag() { return mouseDrag; },
+  step, input, reset, startPlaying, restart, die, spawnFood,
+  recordScore, loadScores, renderRank, commitName, screenDir, segColor,
+};
 </script>
 </body>
 </html>
