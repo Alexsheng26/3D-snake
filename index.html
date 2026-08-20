@@ -805,9 +805,12 @@ function syncUI() {
     if (o.rank) renderRank(S.state === "over" ? S.lastRank : -1);
   };
 
+  const touch = document.body.classList.contains("touch");
+
   if (S.state === "ready") {
     show({ title: "3D 贪吃蛇", text: "45° 俯视视角 · 立体果实",
-           name: "开始", rank: true, hint: "按方向键开始" });
+           name: "开始", rank: true,
+           hint: touch ? "滑动屏幕开始" : "按方向键开始" });
   } else if (S.state === "paused") {
     show({ title: "已暂停", text: "", hint: "按 Space 继续" });
   } else if (S.state === "over") {
@@ -815,7 +818,7 @@ function syncUI() {
     show({ title: first ? "新纪录！" : "撞到了！",
            text: S.lastRank >= 0 ? `${S.name} · 第 ${S.lastRank + 1} 名` : "最终得分",
            score: S.score, name: "再来一局", rank: true,
-           hint: "按 R 或 Space 再来一局" });
+           hint: touch ? "点上面的按钮再来一局" : "按 R 或 Space 再来一局" });
   } else {
     ui.overlay.classList.add("hidden");
   }
@@ -992,13 +995,60 @@ for (const b of document.querySelectorAll(".pad button")) {
 }
 if (matchMedia("(pointer: coarse)").matches) document.body.classList.add("touch");
 
-// 拖拽转视角
-let drag = null;
-canvas.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, yaw: S.cam.yawTarget }; });
-addEventListener("pointerup", () => { drag = null; });
-addEventListener("pointermove", (e) => {
-  if (drag) S.cam.yawTarget = drag.yaw + (e.clientX - drag.x) * 0.006;
+/* 手指和鼠标分开处理：
+   触屏 —— 单指滑动 = 转向（手机上第一反应就是滑屏），双指横拖 = 转视角
+   鼠标 —— 拖拽 = 转视角，跟原来一样
+   判断用的是每个事件自带的 pointerType，不是媒体查询，
+   所以带触屏的笔记本两种操作都能用。 */
+const SWIPE_MIN = 26;                       // 触发一次转向的最小位移（px）
+const fingers = new Map();
+let mouseDrag = null, twoFinger = null;
+
+function midX() {
+  let sum = 0;
+  for (const f of fingers.values()) sum += f.x;
+  return sum / fingers.size;
+}
+
+canvas.addEventListener("pointerdown", (e) => {
+  if (e.pointerType === "touch") {
+    fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (fingers.size === 2) twoFinger = { x: midX(), yaw: S.cam.yawTarget };
+  } else {
+    mouseDrag = { x: e.clientX, yaw: S.cam.yawTarget };
+  }
 });
+
+addEventListener("pointermove", (e) => {
+  if (e.pointerType !== "touch") {
+    if (mouseDrag) S.cam.yawTarget = mouseDrag.yaw + (e.clientX - mouseDrag.x) * 0.006;
+    return;
+  }
+  const f = fingers.get(e.pointerId);
+  if (!f) return;
+  fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (fingers.size >= 2) {                  // 双指：转视角，不转向
+    if (twoFinger) S.cam.yawTarget = twoFinger.yaw + (midX() - twoFinger.x) * 0.008;
+    return;
+  }
+  const dx = e.clientX - f.x, dy = e.clientY - f.y;
+  if (Math.hypot(dx, dy) < SWIPE_MIN) {
+    fingers.set(e.pointerId, f);            // 还没够，起点不动，继续攒
+    return;
+  }
+  // 起点重置到当前位置：一笔画个折线就能连着拐两次
+  input(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left")
+                                    : (dy > 0 ? "down" : "up"));
+});
+
+for (const ev of ["pointerup", "pointercancel"]) {
+  addEventListener(ev, (e) => {
+    fingers.delete(e.pointerId);
+    if (fingers.size < 2) twoFinger = null;
+    if (e.pointerType !== "touch") mouseDrag = null;
+  });
+}
 
 /* ============================================================
    5. 渲染
