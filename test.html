@@ -135,6 +135,11 @@ function guard(name, fn) {
   catch (e) { ok(name, false, "抛异常：" + (e && e.message ? e.message : e)); }
 }
 
+async function guardAsync(name, fn) {
+  try { await fn(); }
+  catch (e) { ok(name, false, "抛异常：" + (e && e.message ? e.message : e)); }
+}
+
 const near = (a, b, tol) => Math.abs(a - b) <= tol;
 
 /* ---------- 跑测试 ---------- */
@@ -385,6 +390,42 @@ async function suites(win, G) {
     win.localStorage.setItem(G.KEY_SCORES,
       JSON.stringify([{ name: "好", score: 5 }, { nope: 1 }, { name: "坏", score: "abc" }]));
     ok("脏记录被过滤掉，只留合法的", G.loadScores().length === 1);
+  });
+
+  guard("清空按钮要点两下", () => {
+    S.scores = [];
+    S.name = "甲"; S.score = 9; G.die();
+    S.name = "乙"; S.score = 4; G.die();
+    G.renderRank(-1);
+    ok("有记录时清空按钮可见", !ui.clear.classList.contains("hidden"));
+
+    ui.clear.click();                                    // 第一下
+    ok("点第一下不删，只进入待确认", S.scores.length === 2 && G.clearArmed);
+    ok("按钮变成确认样式", ui.clear.classList.contains("armed") &&
+       ui.clear.textContent.includes("确定"));
+
+    ui.clear.click();                                    // 第二下
+    ok("点第二下才真的清空", S.scores.length === 0);
+    ok("清空后 localStorage 里也没了", (G.loadScores() || []).length === 0);
+    ok("清空后最高分归零", S.best === 0, `best=${S.best}`);
+    ok("清空后按钮恢复原样并隐藏",
+       !G.clearArmed && !ui.clear.classList.contains("armed") &&
+       ui.clear.classList.contains("hidden"));
+  });
+
+  await guardAsync("待确认会自动超时", async () => {
+    S.scores = [];
+    S.name = "丙"; S.score = 6; G.die();
+    G.renderRank(-1);
+    const saved = CONFIG.clearConfirmMs;
+    CONFIG.clearConfirmMs = 60;                          // 别让测试真等 4 秒
+    ui.clear.click();
+    ok("点一下后处于待确认", G.clearArmed);
+    await new Promise((r) => setTimeout(r, 140));
+    ok("超时后自动取消，记录还在",
+       !G.clearArmed && S.scores.length === 1 &&
+       !ui.clear.classList.contains("armed"));
+    CONFIG.clearConfirmMs = saved;
   });
 
   guard("名字当文本渲染", () => {

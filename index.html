@@ -123,10 +123,26 @@
 
   /* 计分榜 */
   .rank{ margin-top: 18px; text-align: left; }
+  .rank-head{
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; margin-bottom: 7px;
+  }
   .rank-k{
     font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
-    color: var(--dim); margin-bottom: 7px;
+    color: var(--dim);
   }
+  .rank-clear{
+    padding: 2px 9px; cursor: pointer; font: inherit; font-size: 11px;
+    background: transparent; border: 1px solid var(--edge);
+    border-radius: 7px; color: var(--dim);
+  }
+  .rank-clear:hover{ color: var(--ink); border-color: rgba(255,255,255,.32); }
+  .rank-clear:focus-visible{ outline: 2px solid var(--accent); outline-offset: 2px; }
+  .rank-clear.armed{                       /* 点第一下之后，等第二下确认 */
+    color: #ff96a0; border-color: rgba(255,107,122,.55);
+    background: rgba(255,107,122,.13);
+  }
+  .rank-clear.hidden{ display: none; }
   .rank ol{ list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
   .rank li{
     display: grid; grid-template-columns: 20px 1fr auto; align-items: baseline;
@@ -228,7 +244,10 @@
       </div>
 
       <div class="rank" id="ov-rank">
-        <div class="rank-k">计分榜</div>
+        <div class="rank-head">
+          <span class="rank-k">计分榜</span>
+          <button class="rank-clear" id="ov-clear" type="button">清空</button>
+        </div>
         <ol id="ov-list"></ol>
       </div>
 
@@ -257,6 +276,7 @@ const CONFIG = {
   speedUp:     5,       // 每吃一个果实，每步减少的毫秒
   startLen:    3,
   wrap:        false,   // true = 撞墙穿到对面，false = 撞墙死
+  clearConfirmMs: 4000, // 清空计分榜：点第一下后，多久没点第二下就自动取消
   // 金果：限时的双倍分果实。超时没吃到就变回普通果实，不会让你没东西可追
   gold: { chance: 0.3, points: 2, ttlMs: 7000, minScore: 2 },
   // pitch=45 即 45° 俯视；yaw 侧转一点，方块才有立体面，不会看成 2D 贴片
@@ -701,7 +721,7 @@ const ui = {
   overlay: $("overlay"), title: $("ov-title"), text: $("ov-text"),
   ovScore: $("ov-score"), hint: $("ov-hint"),
   nameRow: $("ov-namerow"), name: $("ov-name"), start: $("ov-start"),
-  rank: $("ov-rank"), list: $("ov-list"), mute: $("mute"),
+  rank: $("ov-rank"), list: $("ov-list"), mute: $("mute"), clear: $("ov-clear"),
 };
 
 /* ---- 计分榜（存在 localStorage，无痕模式下就只在本次会话有效）---- */
@@ -737,6 +757,8 @@ function recordScore(name, score) {
 /** 用 DOM 拼，名字是玩家输入的，绝不拼 HTML 字符串 */
 function renderRank(mark) {
   ui.list.textContent = "";
+  ui.clear.classList.toggle("hidden", !S.scores.length);   // 空榜没什么可清
+  disarmClear();                                           // 卡片重画就取消待确认
   if (!S.scores.length) {
     const li = document.createElement("li");
     li.className = "empty";
@@ -755,6 +777,32 @@ function renderRank(mark) {
   });
 }
 
+/* ---- 清空计分榜：点两下确认，避免手滑一键抹掉所有记录 ---- */
+let clearArmed = false, clearTimer = 0;
+
+function disarmClear() {
+  clearTimeout(clearTimer);
+  clearArmed = false;
+  ui.clear.classList.remove("armed");
+  ui.clear.textContent = "清空";
+}
+
+function onClearClick() {
+  if (!clearArmed) {                       // 第一下：只进入待确认，什么都不删
+    clearArmed = true;
+    ui.clear.classList.add("armed");
+    ui.clear.textContent = "确定清空？";
+    clearTimer = setTimeout(disarmClear, CONFIG.clearConfirmMs);
+    return;
+  }
+  disarmClear();                           // 第二下：真删
+  S.scores = [];
+  saveScores();
+  S.best = 0;
+  S.lastRank = -1;
+  syncUI();
+}
+
 /** 取输入框里的名字，落库，返回干净的值 */
 function commitName() {
   const raw = (ui.name.value || "").trim().replace(/\s+/g, " ").slice(0, 12);
@@ -770,6 +818,7 @@ try { ui.name.value = localStorage.getItem(KEY_NAME) || ""; } catch (e) {}
 ui.start.addEventListener("click", () => {
   S.state === "over" ? restart() : startPlaying();
 });
+ui.clear.addEventListener("click", onClearClick);
 
 function cellFree(x, z) {
   return !S.snake.some((c) => c.x === x && c.z === z);
@@ -1316,6 +1365,8 @@ window.__snake3d = {
   get mouseDrag() { return mouseDrag; },
   step, input, reset, startPlaying, restart, die, spawnFood,
   recordScore, loadScores, renderRank, commitName, screenDir, segColor,
+  onClearClick, disarmClear,
+  get clearArmed() { return clearArmed; },
 };
 </script>
 </body>
