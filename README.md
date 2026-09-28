@@ -38,6 +38,16 @@ python3 -m http.server 8000
 **转视角改成双指横拖** —— 单指留给转向了，不然一滑就变成转镜头，
 手机上没人找得到怎么控制蛇。
 
+**可以装到主屏幕**：iOS 用 Safari 的「添加到主屏幕」，Android 用 Chrome 的
+「安装应用」，之后是全屏运行的，不带地址栏。图标和启动配置在
+`manifest.webmanifest`（Android）和 `<head>` 里的 `apple-mobile-web-app-*`（iOS）。
+
+布局上照顾了这些：刘海 / home 指示条用 `env(safe-area-inset-*)` 让开；
+卡片亮着时方向键盘自动隐藏（那会儿本来也不在玩），免得压住按钮；
+手机横屏高度不够时卡片整体收紧、计分榜少列两行，装不下还能自己滚。
+触屏识别除了媒体查询，真有手指按下时也会兜底切换 —— iPad 接了键盘
+或者触屏笔记本上，媒体查询可能判错。
+
 ## 测试
 
 打开 **[test.html](https://alexsheng26.github.io/3D-snake/test.html)** 就跑，70 条断言，
